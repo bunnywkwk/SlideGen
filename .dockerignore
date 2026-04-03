@@ -1,0 +1,20 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+backend/.env
+frontend/.env
+
+frontend/node_modules
+frontend/dist
+
+backend/output
+backend/uploads
+
+.vscode
+automation-output.pptx
+automation-output (1).pptx
