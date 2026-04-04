@@ -3,6 +3,9 @@ import ProgressBar from "../components/ProgressBar.jsx";
 import StatusBanner from "../components/StatusBanner.jsx";
 import { downloadPptWithProgress, generatePreviewWithProgress, saveBlobFile } from "../lib/api.js";
 
+const BASE_SONG_SLOTS = 4;
+const MAX_SONG_SLOTS = 8;
+
 const createEmptySong = () => ({
   title: "",
   lyrics: "",
@@ -12,22 +15,21 @@ function LyricsPage({ options }) {
   const [form, setForm] = useState({
     include_welcome_slide: false,
     include_verse_labels: false,
-    songs: [createEmptySong(), createEmptySong(), createEmptySong()],
+    songs: Array.from({ length: BASE_SONG_SLOTS }, createEmptySong),
   });
   const [preview, setPreview] = useState(null);
   const [busyLabel, setBusyLabel] = useState("");
   const [busyProgress, setBusyProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
 
-  function applyProgress(status) {
-    setBusyLabel(status.message || "Working...");
-    setBusyProgress(status.progress ?? 0);
-  }
-
   useEffect(() => {
-    const desiredSlots = Math.max(1, Math.min(options.defaults?.lyrics_song_slots || 3, 4));
+    const desiredSlots = Math.max(
+      BASE_SONG_SLOTS,
+      Math.min(options.defaults?.lyrics_song_slots || BASE_SONG_SLOTS, MAX_SONG_SLOTS),
+    );
+
     setForm((current) => {
-      if (current.songs.length === desiredSlots) {
+      if (current.songs.length >= desiredSlots) {
         return current;
       }
 
@@ -35,9 +37,10 @@ function LyricsPage({ options }) {
       while (nextSongs.length < desiredSlots) {
         nextSongs.push(createEmptySong());
       }
+
       return {
         ...current,
-        songs: nextSongs.slice(0, desiredSlots),
+        songs: nextSongs,
       };
     });
   }, [options.defaults]);
@@ -56,9 +59,32 @@ function LyricsPage({ options }) {
     });
   }
 
+  function clearSong(index) {
+    setForm((current) => {
+      const nextSongs = [...current.songs];
+      nextSongs[index] = createEmptySong();
+      return {
+        ...current,
+        songs: nextSongs,
+      };
+    });
+  }
+
+  function removeSong(index) {
+    setForm((current) => {
+      if (current.songs.length <= BASE_SONG_SLOTS) {
+        return current;
+      }
+      return {
+        ...current,
+        songs: current.songs.filter((_, songIndex) => songIndex !== index),
+      };
+    });
+  }
+
   function addSong() {
     setForm((current) => {
-      if (current.songs.length >= 4) {
+      if (current.songs.length >= MAX_SONG_SLOTS) {
         return current;
       }
       return {
@@ -68,16 +94,9 @@ function LyricsPage({ options }) {
     });
   }
 
-  function removeSong() {
-    setForm((current) => {
-      if (current.songs.length <= 1) {
-        return current;
-      }
-      return {
-        ...current,
-        songs: current.songs.slice(0, -1),
-      };
-    });
+  function applyProgress(status) {
+    setBusyLabel(status.message || "Working...");
+    setBusyProgress(status.progress ?? 0);
   }
 
   function buildPayload() {
@@ -139,170 +158,216 @@ function LyricsPage({ options }) {
     }
   }
 
+  const populatedSongs = form.songs.filter((song) => song.title.trim() || song.lyrics.trim()).length;
+  const canAddSong = form.songs.length < MAX_SONG_SLOTS;
+
   return (
     <main className="page-grid">
-      <section className="page-intro">
-        <div>
+      <section className="lyrics-mini-header">
+        <div className="lyrics-mini-copy">
           <p className="page-kicker">Lyrics Module</p>
-          <h3>Build worship-song decks with a cleaner editorial workspace.</h3>
+          <h3>Song editor</h3>
         </div>
-        <div className="page-actions">
-          <button type="button" className="ghost-button" onClick={addSong}>
-            Add Song
-          </button>
-          <button type="button" className="ghost-button" onClick={removeSong}>
-            Remove Song
-          </button>
+        <div className="lyrics-mini-pills">
+          <span className="pill">{form.songs.length} song slots</span>
+          <span className="pill">{populatedSongs} ready</span>
         </div>
       </section>
 
       <ProgressBar active={Boolean(busyLabel)} label={busyLabel} accent="orange" progressValue={busyProgress} />
       <StatusBanner tone="error">{errorMessage}</StatusBanner>
 
-      <section className="module-layout">
-        <div className="module-main">
-          <article className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="feature-kicker">Deck Settings</p>
-                <h4>Keep the workflow simple</h4>
-              </div>
-            </div>
-
-            <div className="toggle-row">
-              <label className="toggle-card compact">
-                <input
-                  type="checkbox"
-                  checked={form.include_welcome_slide}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      include_welcome_slide: event.target.checked,
-                    }))
-                  }
-                />
-                <div>
-                  <strong>Keep welcome slide</strong>
-                  <p>Add a cover slide before the song slides.</p>
-                </div>
-              </label>
-
-              <label className="toggle-card compact">
-                <input
-                  type="checkbox"
-                  checked={form.include_verse_labels}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      include_verse_labels: event.target.checked,
-                    }))
-                  }
-                />
-                <div>
-                  <strong>Show section labels</strong>
-                  <p>Add section cues like `VERSE:` and `CHORUS:` to the slides.</p>
-                </div>
-              </label>
-            </div>
-          </article>
-
-          <article className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="feature-kicker">Song Editor</p>
-                <h4>Paste and organize lyrics</h4>
-              </div>
-              <span className="pill">{form.songs.length} song slot(s)</span>
-            </div>
-
-            <div className="stack-list">
-              {form.songs.map((song, index) => (
-                <div className="editor-card" key={`lyrics-song-${index}`}>
-                  <div className="editor-heading">
-                    <h5>Song {index + 1}</h5>
-                    <span className="mini-pill">
-                      {song.lyrics.trim() ? `${song.lyrics.trim().split(/\n+/).length} lines` : "Empty"}
-                    </span>
-                  </div>
-
-                  <label className="field">
-                    <span>Title</span>
-                    <input
-                      value={song.title}
-                      onChange={(event) => updateSong(index, "title", event.target.value)}
-                      placeholder="Enter the song title"
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Lyrics</span>
-                    <textarea
-                      rows="10"
-                      value={song.lyrics}
-                      onChange={(event) => updateSong(index, "lyrics", event.target.value)}
-                      placeholder="Paste lyrics here. You can use [Verse], [Chorus], [Bridge], and --- for manual slide breaks."
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
-
-            <div className="button-row">
-              <button type="button" className="primary-button" onClick={handlePreview}>
-                Preview Lyrics
-              </button>
-              <button type="button" className="secondary-button strong" onClick={handleDownload}>
-                Download PPTX
-              </button>
-            </div>
-          </article>
+      <section className="panel lyrics-controls-panel">
+        <div className="toolbar-heading">
+          <p className="feature-kicker">Lyrics Workflow</p>
         </div>
 
-        <aside className="module-sidebar">
-          <article className="panel panel-sticky">
-            <div className="panel-header">
+        <div className="lyrics-toolbar">
+          <div className="lyrics-stat-card">
+            <span>Default setup</span>
+            <strong>4 songs ready to edit</strong>
+            <p>Add extra slots only when you need them.</p>
+          </div>
+
+          <div className="toggle-row lyrics-toggle-row">
+            <label className="toggle-card compact">
+              <input
+                type="checkbox"
+                checked={form.include_welcome_slide}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    include_welcome_slide: event.target.checked,
+                  }))
+                }
+              />
               <div>
-                <p className="feature-kicker">Preview</p>
-                <h4>Slide planning</h4>
+                <strong>Keep welcome slide</strong>
+                <p>Add a cover slide before the song slides.</p>
+              </div>
+            </label>
+
+            <label className="toggle-card compact">
+              <input
+                type="checkbox"
+                checked={form.include_verse_labels}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    include_verse_labels: event.target.checked,
+                  }))
+                }
+              />
+              <div>
+                <strong>Show section labels</strong>
+                <p>Add cues like `VERSE:` and `CHORUS:` on the slides.</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="lyrics-action-strip">
+          <div className="lyrics-inline-actions">
+            <button type="button" className="ghost-button" onClick={addSong} disabled={!canAddSong}>
+              Add Song Slot
+            </button>
+            <span className="helper-chip">{canAddSong ? `Up to ${MAX_SONG_SLOTS} songs per deck` : "Maximum song slots reached"}</span>
+          </div>
+
+          <div className="button-row lyrics-button-row">
+            <button type="button" className="primary-button verse-action-button" onClick={handlePreview}>
+              Preview Lyrics
+            </button>
+            <button type="button" className="secondary-button strong verse-action-button" onClick={handleDownload}>
+              Download PowerPoint
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="lyrics-editor-surface">
+        <div className="lyrics-surface-header">
+          <div>
+            <p className="feature-kicker">Song Editor</p>
+            <h4>Paste each song into its own card</h4>
+          </div>
+          <span className="pill">{form.songs.length} visible cards</span>
+        </div>
+
+        <div className="lyrics-editor-grid">
+          {form.songs.map((song, index) => {
+            const canRemove = form.songs.length > BASE_SONG_SLOTS;
+            const hasContent = song.title.trim() || song.lyrics.trim();
+
+            return (
+              <article className="editor-card lyrics-editor-card" key={`lyrics-song-${index}`}>
+                <div className="editor-heading">
+                  <div className="lyrics-editor-heading-copy">
+                    <h5>Song {index + 1}</h5>
+                    <span className="mini-pill">
+                      {hasContent ? `${song.lyrics.trim().split(/\n+/).filter(Boolean).length} lines` : "Waiting for lyrics"}
+                    </span>
+                  </div>
+                  <div className="editor-card-actions">
+                    <button type="button" className="ghost-button lyrics-inline-button" onClick={() => clearSong(index)}>
+                      Clear
+                    </button>
+                    {canRemove && index >= BASE_SONG_SLOTS ? (
+                      <button
+                        type="button"
+                        className="ghost-button lyrics-inline-button lyrics-remove-button"
+                        onClick={() => removeSong(index)}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <label className="field">
+                  <span>Title</span>
+                  <input
+                    value={song.title}
+                    onChange={(event) => updateSong(index, "title", event.target.value)}
+                    placeholder="Enter the song title"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Lyrics</span>
+                  <textarea
+                    rows="11"
+                    value={song.lyrics}
+                    onChange={(event) => updateSong(index, "lyrics", event.target.value)}
+                    placeholder="Paste lyrics here. Use [Verse], [Chorus], [Bridge], and --- for manual slide breaks."
+                  />
+                </label>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="lyrics-preview-surface">
+        {preview ? (
+          <>
+            <div className="summary-grid lyrics-summary-grid">
+              <div className="info-card">
+                <span>Total slides</span>
+                <strong>{preview.total_slide_count}</strong>
+              </div>
+              <div className="info-card">
+                <span>Presentation mode</span>
+                <strong>{preview.presentation_mode}</strong>
+              </div>
+              <div className="info-card">
+                <span>Song count</span>
+                <strong>{preview.songs.length}</strong>
               </div>
             </div>
 
-            {preview ? (
-              <div className="preview-stack">
-                <div className="info-card">
-                  <span>Total slides</span>
-                  <strong>{preview.total_slide_count}</strong>
-                </div>
-                <div className="info-card">
-                  <span>Presentation mode</span>
-                  <strong>{preview.presentation_mode}</strong>
-                </div>
-
-                {preview.songs.map((song) => (
-                  <article key={song.title} className="preview-note">
-                    <div className="preview-note-header">
+            <div className="lyrics-preview-grid">
+              {preview.songs.map((song, index) => (
+                <article key={`${song.title}-${index}`} className="preview-note lyrics-preview-song">
+                  <div className="preview-note-header">
+                    <div>
                       <h5>{song.title}</h5>
-                      <span>{song.slide_count} slides</span>
+                      <span>{song.slide_count} slides planned</span>
                     </div>
+                    <span className="mini-pill">{song.chunks.length} chunks</span>
+                  </div>
 
-                    {song.warnings.length > 0 ? (
-                      <p className="tone-warning">{song.warnings.join(" | ")}</p>
-                    ) : (
-                      <p className="tone-success">No validation warnings.</p>
-                    )}
+                  {song.warnings.length > 0 ? (
+                    <p className="tone-warning">{song.warnings.join(" | ")}</p>
+                  ) : (
+                    <p className="tone-success">Ready for export.</p>
+                  )}
 
-                    <pre>{song.draft_text}</pre>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state">
-                <h5>No preview yet</h5>
-                <p>Generate a lyrics preview to inspect the draft text and estimated slide count.</p>
-              </div>
-            )}
-          </article>
-        </aside>
+                  <div className="lyrics-chunk-list">
+                    {song.chunks.map((chunk, chunkIndex) => (
+                      <div key={`${song.title}-${chunkIndex}`} className="lyrics-chunk-card">
+                        <div className="lyrics-chunk-header">
+                          <strong>{chunk.section_label || chunk.section_name}</strong>
+                          <span>{chunk.lines.length} lines</span>
+                        </div>
+                        <div className="lyrics-chunk-lines">
+                          {chunk.lines.map((line, lineIndex) => (
+                            <p key={`${song.title}-${chunkIndex}-${lineIndex}`}>{line}</p>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="empty-state verse-empty-state">
+            <h5>No preview yet</h5>
+            <p>Use the song editor above, then load a lyrics preview. Clean slide chunks will appear here.</p>
+          </div>
+        )}
       </section>
     </main>
   );

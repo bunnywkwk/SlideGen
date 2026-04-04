@@ -15,7 +15,7 @@ class LyricsGenerateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     job_type: Literal["lyrics"]
-    songs: list[SongInput] = Field(..., min_length=1, max_length=4)
+    songs: list[SongInput] = Field(..., min_length=1, max_length=8)
     template_path: str | None = None
     include_welcome_slide: bool = False
     include_verse_labels: bool = False

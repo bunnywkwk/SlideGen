@@ -4,7 +4,7 @@ import ProgressBar from "./ProgressBar.jsx";
 function AppShell({ options, loading, loadingLabel, loadError, children }) {
   const verseLookupReady = options.app?.verse_lookup_ready;
   const location = useLocation();
-  const hideWorkspaceHero = location.pathname === "/verses";
+  const hideWorkspaceHero = location.pathname === "/verses" || location.pathname === "/lyrics";
 
   return (
     <div className="app-frame">
