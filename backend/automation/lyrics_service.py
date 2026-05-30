@@ -29,7 +29,17 @@ def _report(progress_callback: ProgressCallback, progress: int, message: str) ->
 
 
 def get_default_lyrics_template() -> Path:
+    preferred_template = LEGACY_LYRICS_DIR / "samples-ppt" / "March-14-2026.pptx"
+    if preferred_template.exists():
+        return preferred_template
     return resolve_template(None, LEGACY_LYRICS_DIR / "samples-ppt")
+
+
+def get_bundled_lyrics_template() -> Path | None:
+    try:
+        return get_default_lyrics_template()
+    except FileNotFoundError:
+        return None
 
 
 def resolve_lyrics_template(raw_template_path: str | None) -> Path:
@@ -96,8 +106,13 @@ def build_lyrics_preview(request: LyricsGenerateRequest, progress_callback: Prog
         _report(progress_callback, progress, f"Building preview ({index}/{total_songs})...")
 
     total_slide_count = sum(song.slide_count for song in preview_songs)
+    has_bundled_template = get_bundled_lyrics_template() is not None
     response = LyricsPreviewResponse(
-        presentation_mode="template-based" if request.template_path and settings.enable_legacy_templates else "portable",
+        presentation_mode=(
+            "template-based"
+            if request.template_path and settings.enable_legacy_templates
+            else ("bundled-template" if has_bundled_template else "portable")
+        ),
         total_slide_count=total_slide_count,
         songs=preview_songs,
     )
@@ -126,6 +141,7 @@ def generate_lyrics_ppt(request: LyricsGenerateRequest, progress_callback: Progr
             include_verse_labels=request.include_verse_labels,
         )
     else:
+        template_path = get_bundled_lyrics_template()
         _report(progress_callback, 76, "Rendering PowerPoint slides...")
         create_lyrics_presentation_portable(
             output_path=output_path,
@@ -133,6 +149,7 @@ def generate_lyrics_ppt(request: LyricsGenerateRequest, progress_callback: Progr
             include_welcome_slide=request.include_welcome_slide,
             include_verse_labels=request.include_verse_labels,
             build_song_chunks=build_song_chunks,
+            template_ppt_path=template_path,
         )
     _report(progress_callback, 100, "Lyrics PowerPoint ready.")
     return output_path

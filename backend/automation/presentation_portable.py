@@ -6,6 +6,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
 from .lyrics_domain import SlideChunk, Song
@@ -28,7 +29,20 @@ def create_lyrics_presentation(
     include_welcome_slide: bool,
     include_verse_labels: bool,
     build_song_chunks,
+    template_ppt_path: Path | None = None,
 ) -> None:
+    if template_ppt_path is not None:
+        presentation = Presentation(str(template_ppt_path))
+        _create_template_based_lyrics_presentation(
+            presentation=presentation,
+            songs=songs,
+            include_welcome_slide=include_welcome_slide,
+            include_verse_labels=include_verse_labels,
+            build_song_chunks=build_song_chunks,
+        )
+        presentation.save(str(output_path))
+        return
+
     presentation = _base_presentation()
 
     if include_welcome_slide:
@@ -149,6 +163,158 @@ def _build_reference_range(book: str, chapter: int, verse_numbers: list[int]) ->
     return f"{book} {chapter}:{start_verse}-{end_verse}"
 
 
+def _create_template_based_lyrics_presentation(
+    presentation: Presentation,
+    songs: list[Song],
+    include_welcome_slide: bool,
+    include_verse_labels: bool,
+    build_song_chunks,
+) -> None:
+    original_slide_count = len(presentation.slides)
+    catalog = _build_lyrics_prototype_catalog(presentation)
+
+    for song in songs:
+        title_slide = _duplicate_slide(presentation, catalog["title_index"])
+        _render_template_title_slide(title_slide, song.title)
+
+        for chunk in build_song_chunks(song, include_verse_labels=include_verse_labels):
+            lyric_slide = _duplicate_slide(presentation, _choose_lyrics_prototype_index(catalog, chunk))
+            _render_template_lyric_slide(lyric_slide, chunk)
+
+    _remove_original_template_slides(
+        presentation,
+        original_slide_count=original_slide_count,
+        keep_first_slide=include_welcome_slide,
+    )
+
+
+def _build_lyrics_prototype_catalog(presentation: Presentation) -> dict[str, object]:
+    catalog: dict[str, object] = {}
+    lyric_candidates: dict[tuple[int, bool], int] = {}
+
+    for index, slide in enumerate(presentation.slides):
+        main_lines, has_label, title_like = _lyrics_prototype_signature(slide)
+        if title_like:
+            title_text = _normalize_template_text(_primary_text_shape(slide).text)
+            if title_text != "WELCOME" and "title_index" not in catalog:
+                catalog["title_index"] = index
+        if main_lines >= 1 and not title_like:
+            lyric_candidates.setdefault((main_lines, has_label), index)
+
+    if "title_index" not in catalog:
+        raise ValueError("Could not find a lyrics title-slide prototype in the bundled PowerPoint template.")
+    if not lyric_candidates:
+        raise ValueError("Could not find lyrics slide prototypes in the bundled PowerPoint template.")
+
+    catalog["lyric_candidates"] = lyric_candidates
+    return catalog
+
+
+def _choose_lyrics_prototype_index(catalog: dict[str, object], chunk: SlideChunk) -> int:
+    line_count = len(chunk.lines)
+    has_label = bool(chunk.section_label)
+    preferred_keys = [
+        (line_count, has_label),
+        (line_count, False),
+        (line_count, True),
+    ]
+
+    if line_count == 1:
+        preferred_keys.extend([(2, True), (2, False)])
+    if line_count == 2:
+        preferred_keys.extend([(3, False), (3, True)])
+    if line_count == 3:
+        preferred_keys.extend([(2, has_label), (4, has_label)])
+    if line_count >= 4:
+        preferred_keys.extend([(4, True), (4, False), (3, True), (3, False)])
+
+    lyric_candidates = catalog["lyric_candidates"]
+    assert isinstance(lyric_candidates, dict)
+
+    seen: set[tuple[int, bool]] = set()
+    for key in preferred_keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        if key in lyric_candidates:
+            return lyric_candidates[key]
+
+    return next(iter(lyric_candidates.values()))
+
+
+def _lyrics_prototype_signature(slide) -> tuple[int, bool, bool]:
+    shapes = _text_shapes(slide)
+    if not shapes:
+        return (0, False, False)
+
+    main_shape = _primary_text_shape(slide)
+    main_lines = len(_shape_text_lines(main_shape))
+    extra_shape = _secondary_text_shape(slide)
+    has_label = False
+    if extra_shape is not None:
+        has_label = _normalize_template_text(extra_shape.text).endswith(":")
+
+    title_like = len(shapes) == 1 and main_lines == 1
+    return (main_lines, has_label, title_like)
+
+
+def _render_template_title_slide(slide, song_title: str) -> None:
+    title_shape = _primary_text_shape(slide)
+    _replace_text_preserving_template_format(title_shape, song_title.upper())
+
+
+def _render_template_lyric_slide(slide, chunk: SlideChunk) -> None:
+    lyric_shape = _primary_text_shape(slide)
+    section_shape = _secondary_text_shape(slide)
+    _replace_text_preserving_template_format(lyric_shape, "\n".join(chunk.lines))
+
+    if section_shape is not None:
+        _replace_text_preserving_template_format(section_shape, chunk.section_label or "")
+
+
+def _text_shapes(slide) -> list:
+    return [shape for shape in slide.shapes if hasattr(shape, "text_frame")]
+
+
+def _primary_text_shape(slide):
+    candidates = []
+    for shape in _text_shapes(slide):
+        area = int(shape.width) * int(shape.height)
+        text_length = len(_normalize_template_text(shape.text))
+        candidates.append((area, text_length, shape))
+
+    if not candidates:
+        raise ValueError("No text shapes found on lyrics template slide.")
+
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return candidates[0][2]
+
+
+def _secondary_text_shape(slide):
+    candidates = []
+    for shape in _text_shapes(slide):
+        area = int(shape.width) * int(shape.height)
+        candidates.append((area, int(shape.top), int(shape.left), -len(_normalize_template_text(shape.text)), shape))
+
+    if len(candidates) < 2:
+        return None
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+    return candidates[0][4]
+
+
+def _shape_text_lines(shape) -> list[str]:
+    return [
+        _normalize_template_text(paragraph.text)
+        for paragraph in shape.text_frame.paragraphs
+        if _normalize_template_text(paragraph.text)
+    ]
+
+
+def _normalize_template_text(text: str) -> str:
+    return " ".join((text or "").replace("\r", " ").replace("\n", " ").split())
+
+
 def _looks_like_structured_verse_template(presentation: Presentation) -> bool:
     if len(presentation.slides) < 2:
         return False
@@ -220,15 +386,30 @@ def _create_template_based_verses_presentation(
 
 def _trim_to_slide_count(presentation: Presentation, keep_count: int) -> None:
     while len(presentation.slides) > keep_count:
-        slide_id = presentation.slides._sldIdLst[-1]
-        relationship_id = slide_id.rId
-        presentation.part.drop_rel(relationship_id)
-        del presentation.slides._sldIdLst[-1]
+        _delete_slide_at_index(presentation, len(presentation.slides) - 1)
+
+
+def _remove_original_template_slides(
+    presentation: Presentation,
+    original_slide_count: int,
+    keep_first_slide: bool,
+) -> None:
+    first_delete_index = 1 if keep_first_slide else 0
+    for index in range(original_slide_count - 1, first_delete_index - 1, -1):
+        _delete_slide_at_index(presentation, index)
+
+
+def _delete_slide_at_index(presentation: Presentation, index: int) -> None:
+    slide_id = presentation.slides._sldIdLst[index]
+    relationship_id = slide_id.rId
+    presentation.part.drop_rel(relationship_id)
+    del presentation.slides._sldIdLst[index]
 
 
 def _duplicate_slide(presentation: Presentation, source_index: int):
     source_slide = presentation.slides[source_index]
     duplicated_slide = presentation.slides.add_slide(source_slide.slide_layout)
+    relationship_id_map: dict[str, str] = {}
 
     for shape in list(duplicated_slide.shapes):
         shape.element.getparent().remove(shape.element)
@@ -241,12 +422,25 @@ def _duplicate_slide(presentation: Presentation, source_index: int):
         if relation.reltype in {RT.SLIDE_LAYOUT, RT.NOTES_SLIDE}:
             continue
         if relation.is_external:
-            duplicated_slide.part.rels.get_or_add_ext_rel(relation.reltype, relation.target_ref)
+            relationship_id_map[relation.rId] = duplicated_slide.part.rels.get_or_add_ext_rel(relation.reltype, relation.target_ref)
         else:
-            duplicated_slide.part.rels.get_or_add(relation.reltype, relation._target)
+            relationship_id_map[relation.rId] = duplicated_slide.part.rels.get_or_add(relation.reltype, relation._target)
 
     _copy_slide_background(source_slide, duplicated_slide)
+    _remap_relationship_ids(duplicated_slide._element, relationship_id_map)
     return duplicated_slide
+
+
+def _remap_relationship_ids(slide_element, relationship_id_map: dict[str, str]) -> None:
+    if not relationship_id_map:
+        return
+
+    relationship_attributes = (qn("r:embed"), qn("r:link"), qn("r:id"))
+    for element in slide_element.iter():
+        for attribute_name in relationship_attributes:
+            old_relationship_id = element.get(attribute_name)
+            if old_relationship_id in relationship_id_map:
+                element.set(attribute_name, relationship_id_map[old_relationship_id])
 
 
 def _set_shape_text(slide, shape_name: str, text: str) -> None:
