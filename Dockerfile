@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY backend /app/backend
 COPY November-26-24.pptx /app/November-26-24.pptx
+COPY March-14-2026.pptx /app/March-14-2026.pptx
 COPY lyrics-generator/samples-ppt /app/lyrics-generator/samples-ppt
 
 WORKDIR /app/backend
