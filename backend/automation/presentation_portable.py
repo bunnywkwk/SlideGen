@@ -268,6 +268,11 @@ def _render_template_lyric_slide(slide, chunk: SlideChunk) -> None:
     section_shape = _secondary_text_shape(slide)
     _replace_text_preserving_template_format(lyric_shape, "\n".join(chunk.lines))
 
+    try:
+        lyric_shape.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    except Exception:
+        pass
+
     if section_shape is not None:
         _replace_text_preserving_template_format(section_shape, chunk.section_label or "")
 

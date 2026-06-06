@@ -399,12 +399,16 @@ def set_shape_text(shape, text: str) -> None:
 
 
 def center_main_text_shape(shape) -> None:
+    for attr in ["MarginTop", "MarginBottom", "MarginLeft", "MarginRight"]:
+        try:
+            setattr(shape.TextFrame, attr, 0)
+        except Exception:
+            pass
     try:
-        shape.TextFrame.MarginTop = 0
-        shape.TextFrame.MarginBottom = 0
-        shape.TextFrame.MarginLeft = 0
-        shape.TextFrame.MarginRight = 0
         shape.TextFrame.VerticalAnchor = MIDDLE_ANCHOR
+    except Exception:
+        pass
+    try:
         shape.TextFrame.TextRange.ParagraphFormat.Alignment = CENTER_ALIGN
     except Exception:
         pass
