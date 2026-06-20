@@ -59,6 +59,8 @@ def parse_song_text(text: str, source_name: str = "Pasted Song", title_hint: Opt
     for raw_line in raw_lines:
         line = normalize_line(raw_line)
         if not line:
+            if current_lines and current_lines[-1] != SLIDE_BREAK:
+                current_lines.append(SLIDE_BREAK)
             continue
 
         title_match = re.match(r"^(?:title|song)\s*:\s*(.+)$", line, re.IGNORECASE)
@@ -74,7 +76,10 @@ def parse_song_text(text: str, source_name: str = "Pasted Song", title_hint: Opt
         heading_match = re.match(r"^\[(.+?)\]$", line) or (re.match(r"^(.+)$", line) if is_section_heading(line) else None)
         if heading_match and is_section_heading(heading_match.group(1)):
             if current_lines:
-                sections.append(Section(name=current_name, lines=current_lines))
+                if current_lines[-1] == SLIDE_BREAK:
+                    current_lines.pop()
+                if current_lines:
+                    sections.append(Section(name=current_name, lines=current_lines))
                 current_lines = []
             current_name = normalize_section_name(heading_match.group(1))
             continue
@@ -90,7 +95,10 @@ def parse_song_text(text: str, source_name: str = "Pasted Song", title_hint: Opt
         saw_content = True
 
     if current_lines:
-        sections.append(Section(name=current_name, lines=current_lines))
+        if current_lines[-1] == SLIDE_BREAK:
+            current_lines.pop()
+        if current_lines:
+            sections.append(Section(name=current_name, lines=current_lines))
 
     if not sections:
         raise ValueError(f"No lyric lines found in {source_name}")
@@ -195,10 +203,10 @@ def choose_chunk_size(lines: list[str], start_index: int) -> int:
 
     if len(next_four) == 4 and max(estimate_line_weight(line) for line in next_four) <= 16:
         return 4
-    if max(estimate_line_weight(line) for line in remaining[:2]) <= 30:
-        return 2
     if len(remaining) >= 3 and max(estimate_line_weight(line) for line in remaining[:3]) <= 22:
         return 3
+    if max(estimate_line_weight(line) for line in remaining[:2]) <= 30:
+        return 2
     return 2
 
 
@@ -243,13 +251,9 @@ def build_song_chunks(song: Song, include_verse_labels: bool = False) -> list[Sl
         for group in split_on_manual_breaks(section.lines):
             index = 0
             while index < len(group):
-                if len(group) <= 4:
-                    chunk_lines = group[index:]
-                    index = len(group)
-                else:
-                    chunk_size = choose_chunk_size(group, index)
-                    chunk_lines = group[index:index + chunk_size]
-                    index += chunk_size
+                chunk_size = choose_chunk_size(group, index)
+                chunk_lines = group[index:index + chunk_size]
+                index += chunk_size
                 chunks.append(
                     SlideChunk(
                         song_title=song.title,
@@ -269,13 +273,9 @@ def song_to_draft_text(song: Song) -> str:
         for group in groups:
             index = 0
             while index < len(group):
-                if len(group) <= 4:
-                    chunk_lines = group[index:]
-                    index = len(group)
-                else:
-                    chunk_size = choose_chunk_size(group, index)
-                    chunk_lines = group[index:index + chunk_size]
-                    index += chunk_size
+                chunk_size = choose_chunk_size(group, index)
+                chunk_lines = group[index:index + chunk_size]
+                index += chunk_size
                 chunk_texts.append(chunk_lines)
 
         if lines:
